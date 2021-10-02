@@ -1,8 +1,10 @@
 extern crate pnet;
 extern crate redis;
 
-use pnet::datalink::{self, NetworkInterface};
+use crate::redis::Commands;
+use regex::Regex;
 
+use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::arp::ArpPacket;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet::packet::icmp::{echo_reply, echo_request, IcmpPacket, IcmpTypes};
@@ -247,15 +249,49 @@ fn add_conn_to_redis(con: &mut redis::Connection, conn_key: &String) -> redis::R
     Ok(())
 }
 
-fn increment_conn_bytes(con: &mut redis::Connection, conn_key: &String, bytes: u64) -> redis::RedisResult<()> {
+fn get_conn_key_byte_counter(con: &mut redis::Connection, conn_key: &String) -> redis::RedisResult<i32> {
+    let count: i32 = con.get(conn_key)?;
+    Ok(count)
+}
+
+fn increment_conn_bytes(con: &mut redis::Connection, conn_key: &String, bytes: usize) -> redis::RedisResult<()> {
     let _ : () = redis::cmd("INCRBY").arg(conn_key).arg(bytes).query(con)?;
     Ok(())
 }
 
+pub struct ConnBytes {
+    conn: String,
+    bytes: usize,
+}
+
+impl ConnBytes {
+    pub fn new(conn: String, bytes: usize) -> Self {
+        Self {
+            conn,
+            bytes
+        }
+    }
+}
+
+fn parse_connection_bytes(ethernet: &EthernetPacket) -> Option<ConnBytes> {
+    if let Some(header) = Ipv4Packet::new(ethernet.payload()) {
+        let src_ip = IpAddr::V4(header.get_source());
+        let dst_ip = IpAddr::V4(header.get_destination());
+        let packet = header.payload();
+        let bytes = packet.len();
+        if let Some(tcp) = TcpPacket::new(packet) {
+            let dst_port = tcp.get_destination();
+            let src_port = tcp.get_source();
+            let conn_key = format!("{}:{}::{}:{}", src_ip, src_port, dst_ip, dst_port);
+            let conn_bytes = ConnBytes::new(conn_key, bytes);
+            return Some(conn_bytes)
+        }
+    }
+    None
+}
+
 fn main() {
     use pnet::datalink::Channel::Ethernet;
-
-
     let src_ip = IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 10, 1));
     let dst_ip = IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 10, 2));
     println!("{:?}", src_ip);
@@ -276,9 +312,6 @@ fn main() {
     let conn_key = format!("{}:{}::{}:{}", src_ip, src_port, dst_ip, dst_port);
 
     let mut redis_conn = connect_redis();
-    add_conn_to_redis(&mut redis_conn, &conn_key).expect("Could not create redis key!");
-    increment_conn_bytes(&mut redis_conn, &conn_key, 1645).expect("Could not update redis key!");
-
     let iface_name = match env::args().nth(1) {
         Some(n) => n,
         None => {
@@ -302,6 +335,33 @@ fn main() {
         Ok(_) => panic!("packetdump: unhandled channel type: {}"),
         Err(e) => panic!("packetdump: unable to create channel: {}", e),
     };
+
+    loop {
+        match rx.next() {
+            Ok(packet) => { 
+                let ethernet = &EthernetPacket::new(packet).unwrap();
+                if let Some(conn_bytes) = parse_connection_bytes(&ethernet) {
+                    let conn_key = conn_bytes.conn;
+                    if conn_key.contains("6379") {
+                        continue
+                    } else {
+                        {}
+                    }
+                    let bytes = conn_bytes.bytes;
+                    if let Ok(current_bytes) = get_conn_key_byte_counter(&mut redis_conn, &conn_key) {
+                        increment_conn_bytes(&mut redis_conn, &conn_key, bytes).expect("Could not update redis key!");
+                        let total_bytes = current_bytes as usize + bytes;
+                        println!("Updated existing key | {} | {} total bytes", conn_key, total_bytes)
+                    } else {
+                        add_conn_to_redis(&mut redis_conn, &conn_key).expect("Could not create redis key!");
+                        increment_conn_bytes(&mut redis_conn, &conn_key, bytes).expect("Could not update redis key!");
+                        println!("Created new key | {} | {} starting bytes", conn_key, bytes)
+                    }
+                }
+            }
+            Err(e) => panic!("packetdump: unable to receive packet: {}", e),
+        }
+    }
 
     loop {
         let mut buf: [u8; 1600] = [0u8; 1600];

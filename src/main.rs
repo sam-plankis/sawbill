@@ -279,12 +279,18 @@ fn parse_connection_bytes(ethernet: &EthernetPacket) -> Option<ConnBytes> {
         let dst_ip = IpAddr::V4(header.get_destination());
         let packet = header.payload();
         let bytes = packet.len();
-        if let Some(tcp) = TcpPacket::new(packet) {
-            let dst_port = tcp.get_destination();
-            let src_port = tcp.get_source();
-            let conn_key = format!("{}:{}::{}:{}", src_ip, src_port, dst_ip, dst_port);
-            let conn_bytes = ConnBytes::new(conn_key, bytes);
-            return Some(conn_bytes)
+        match header.get_next_level_protocol() {
+            IpNextHeaderProtocols::Tcp => {
+                if let Some(tcp) = TcpPacket::new(packet) {
+                    let dst_port = tcp.get_destination();
+                    let src_port = tcp.get_source();
+                    let conn_key = format!("{}:{}->{}:{}", src_ip, src_port, dst_ip, dst_port);
+                    let conn_bytes = ConnBytes::new(conn_key, bytes);
+                    return Some(conn_bytes)
+                }
+            }
+            IpNextHeaderProtocols::Udp => { }
+            _ => return None
         }
     }
     None

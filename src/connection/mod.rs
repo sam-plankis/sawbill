@@ -3,31 +3,40 @@ use std::net::IpAddr;
 
 #[derive(Debug)]
 pub struct TcpConnection{
-    a_ip: IpAddr,
+    a_ip: String,
     a_port: u16,
-    z_ip: IpAddr,
+    z_ip: String,
     z_port: u16,
     //a_z_bytes: usize,
     //z_a_bytes: usize,
     //handshake: bool,
-    //a_z_syn_counter: u32,
+    a_z_syn_counter: u32,
     z_a_syn_counter: u32,
     //a_z_dup_ack_nums: Vec<u32>,
     //z_a_dup_ack_nums: Vec<u32>,
     //a_z_dup_seq_nums: Vec<u32>,
     //z_a_dup_seq_nums: Vec<u32>,
+    flow: String,
 }
 
 impl TcpConnection {
-    pub fn new(a_ip: IpAddr, a_port: u16, z_ip: IpAddr, z_port: u16) -> Self {
+    pub fn new(a_ip: String, a_port: u16, z_ip: String, z_port: u16) -> Self {
         let z_a_syn_counter = 0;
+        let a_z_syn_counter = 0;
+        let flow: String = format!("{}:{}<->{}:{}", a_ip, a_port, z_ip, z_port);
         Self {
             a_ip,
             a_port,
             z_ip,
             z_port,
+            a_z_syn_counter,
             z_a_syn_counter,
+            flow,
         }
+    }
+
+    pub fn get_flow(&self) -> String {
+        self.flow.clone()
     }
 
     pub fn get_flows(&self) -> Vec<String> {
@@ -40,11 +49,11 @@ impl TcpConnection {
     }
 
     pub fn get_a_ip(&self) -> String {
-        format!("{}", self.a_ip)
+        self.a_ip.clone()
     }
 
     pub fn get_z_ip(&self) -> String {
-        format!("{}", self.z_ip)
+        self.z_ip.clone()
     }
 
     pub fn get_a_port(&self) -> u16 {

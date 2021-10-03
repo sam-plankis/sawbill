@@ -19,13 +19,14 @@ use pnet::packet::Packet;
 use pnet::util::MacAddr;
 
 use std::env;
+use std::fmt::Result;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use std::process;
 
 use clap::{App, load_yaml};
 use env_logger;
-use log::{debug, error, log_enabled, info, Level};
+use log::{debug, error, log_enabled, info, Level, warn};
 
 
 fn connect_redis() -> redis::Connection {
@@ -34,19 +35,25 @@ fn connect_redis() -> redis::Connection {
     con
 }
 
-fn add_conn_to_redis(con: &mut redis::Connection, conn_key: &String) -> redis::RedisResult<()> {
-    let _ : () = redis::cmd("SET").arg(conn_key).arg(0).query(con)?;
-    Ok(())
+fn increment_z_to_a_syn_counter(con: &mut redis::Connection, tcp_connection: &TcpConnection) -> Option<i32> {
+    let flow = tcp_connection.get_flow();
+    if let Some(counter) = redis::cmd("HINCRBY")
+        .arg(&flow)
+        .arg("z_to_a_syn_counter")
+        .arg(1)
+        .query(con)
+        .unwrap() { return Some(counter) }
+    None
 }
 
-fn get_conn_key_byte_counter(con: &mut redis::Connection, conn_key: &String) -> redis::RedisResult<i32> {
-    let count: i32 = con.get(conn_key)?;
-    Ok(count)
-}
-
-fn increment_conn_bytes(con: &mut redis::Connection, conn_key: &String, bytes: usize) -> redis::RedisResult<()> {
-    let _ : () = redis::cmd("INCRBY").arg(conn_key).arg(bytes).query(con)?;
-    Ok(())
+fn get_z_to_a_syn_counter(con: &mut redis::Connection, tcp_connection: &TcpConnection) -> Option<i32> {
+    let flow = tcp_connection.get_flow();
+    if let Some(counter) = redis::cmd("HGET")
+        .arg(&flow)
+        .arg("z_to_a_syn_counter")
+        .query(con)
+        .unwrap() { return Some(counter) }
+    None
 }
 
 fn get_redis_keys(con: &mut redis::Connection) -> Option<Vec<String>> {
@@ -55,6 +62,27 @@ fn get_redis_keys(con: &mut redis::Connection) -> Option<Vec<String>> {
         .query(con)
         .expect("Could not get redis keys") { return Some(keys) }
     None
+}
+
+fn add_tcp_connection(con: &mut redis::Connection, tcp_connection: &TcpConnection) -> bool {
+    let flow = tcp_connection.get_flow();
+    let a_ip = tcp_connection.get_a_ip();
+    let z_ip = tcp_connection.get_z_ip();
+    let result: redis::RedisResult<String> = redis::cmd("HGET").arg(&flow).arg("a_ip").query(con);
+    match result {
+
+        // Connection already exists.
+        Ok(_) => { return false; }
+
+        // Create the connection.
+        Err(_) => {
+            let _: () = redis::cmd("HSET").arg(&flow).arg("a_to_z_syn_counter").arg(0).query(con).unwrap();
+            let _: () = redis::cmd("HSET").arg(&flow).arg("z_to_a_syn_counter").arg(0).query(con).unwrap();
+            let _: () = redis::cmd("HSET").arg(&flow).arg("a_ip").arg(a_ip).query(con).unwrap();
+            let _: () = redis::cmd("HSET").arg(&flow).arg("z_ip").arg(z_ip).query(con).unwrap();
+            return true
+        }
+    }
 }
 
 fn parse_tcp_ipv4_datagram(ethernet: &EthernetPacket) -> Option<TcpDatagram> {
@@ -96,12 +124,15 @@ fn get_local_ipv4(interface: &NetworkInterface) -> Option<String> {
 fn identify_flow_direction(local_ipv4: &String, tcp_datagram: &TcpDatagram) -> Option<String> {
     let src_ip = tcp_datagram.get_src_ip();
     let dst_ip = tcp_datagram.get_dst_ip();
-    if local_ipv4.contains(&dst_ip) {
+    if local_ipv4 == &dst_ip {
+        debug!("Flow determination | local {} | src {} | dst {} | a_to_z", local_ipv4, src_ip, dst_ip);
         return Some("a_to_z".to_string())
     }
-    if local_ipv4.contains(&src_ip) {
+    if local_ipv4 == &src_ip {
+        debug!("Flow determination | local {} | src {} | dst {} | z_to_a", local_ipv4, src_ip, dst_ip);
         return Some("z_to_a".to_string())
     }
+    debug!("Flow determination | local {} | src {} | dst {} | failed", local_ipv4, src_ip, dst_ip);
     None
 }
 
@@ -162,15 +193,35 @@ fn main() {
                     if flow.contains("6379") {
                         continue
                     }
-                    let bytes = tcp_datagram.get_bytes() as usize;
-                    if let Ok(current_bytes) = get_conn_key_byte_counter(&mut redis_conn, &flow) {
-                        increment_conn_bytes(&mut redis_conn, &flow, bytes).expect("Could not update redis key!");
-                        let total_bytes = current_bytes as usize + bytes;
-                        println!("Updated existing key | {} | {} total bytes", flow, total_bytes)
-                    } else {
-                        add_conn_to_redis(&mut redis_conn, &flow).expect("Could not create redis key!");
-                        increment_conn_bytes(&mut redis_conn, &flow, bytes).expect("Could not update redis key!");
-                        println!("Created new key | {} | {} starting bytes", flow, bytes);
+
+                    let src_ip = tcp_datagram.get_src_ip();
+                    let src_port = tcp_datagram.get_src_port();
+                    let dst_ip = tcp_datagram.get_dst_ip();
+                    let dst_port = tcp_datagram.get_dst_port();
+                    let flow_direction = identify_flow_direction(&local_ipv4, &tcp_datagram).unwrap();
+                    match flow_direction.as_str() {
+                        "a_to_z" => {
+                            let tcp_connection = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
+                            if add_tcp_connection(&mut redis_conn, &tcp_connection) {
+
+                            } else {
+
+                            }
+                        }
+                        "z_to_a" => {
+                            let tcp_connection = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
+                            if add_tcp_connection(&mut redis_conn, &tcp_connection) {
+                                
+                            } else {
+                                if let Some(counter) = increment_z_to_a_syn_counter(&mut redis_conn, &tcp_connection) {
+                                    debug!("{} | z_to_a_syn_counter: {}", flow, counter);
+                                    if counter >= 3 {
+                                        warn!("{} | 3 or more unanswered SYN packets", flow);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {  }
                     }
                 }
             }

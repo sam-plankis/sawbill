@@ -2,12 +2,12 @@ extern crate pnet;
 extern crate redis;
 mod datagram;
 mod connection;
+mod tcpdb;
 
 use datagram::TcpDatagram;
 use connection::TcpConnection;
+use tcpdb::TcpDatabase;
 
-use crate::redis::Commands;
-use redis::RedisResult;
 use regex::Regex;
 
 use pnet::datalink::{self, NetworkInterface};
@@ -28,62 +28,6 @@ use clap::{App, load_yaml};
 use env_logger;
 use log::{debug, error, log_enabled, info, Level, warn};
 
-
-fn connect_redis() -> redis::Connection {
-    let client = redis::Client::open("redis://127.0.0.1:6379").expect("Could not connect to redis!");
-    let con = client.get_connection().expect("Could not connect to redis!");
-    con
-}
-
-fn increment_z_to_a_syn_counter(con: &mut redis::Connection, tcp_connection: &TcpConnection) -> Option<i32> {
-    let flow = tcp_connection.get_flow();
-    if let Some(counter) = redis::cmd("HINCRBY")
-        .arg(&flow)
-        .arg("z_to_a_syn_counter")
-        .arg(1)
-        .query(con)
-        .unwrap() { return Some(counter) }
-    None
-}
-
-fn get_z_to_a_syn_counter(con: &mut redis::Connection, tcp_connection: &TcpConnection) -> Option<i32> {
-    let flow = tcp_connection.get_flow();
-    if let Some(counter) = redis::cmd("HGET")
-        .arg(&flow)
-        .arg("z_to_a_syn_counter")
-        .query(con)
-        .unwrap() { return Some(counter) }
-    None
-}
-
-fn get_redis_keys(con: &mut redis::Connection) -> Option<Vec<String>> {
-    if let Some(keys) = redis::cmd("KEYS")
-        .arg("*")
-        .query(con)
-        .expect("Could not get redis keys") { return Some(keys) }
-    None
-}
-
-fn add_tcp_connection(con: &mut redis::Connection, tcp_connection: &TcpConnection) -> bool {
-    let flow = tcp_connection.get_flow();
-    let a_ip = tcp_connection.get_a_ip();
-    let z_ip = tcp_connection.get_z_ip();
-    let result: redis::RedisResult<String> = redis::cmd("HGET").arg(&flow).arg("a_ip").query(con);
-    match result {
-
-        // Connection already exists.
-        Ok(_) => { return false; }
-
-        // Create the connection.
-        Err(_) => {
-            let _: () = redis::cmd("HSET").arg(&flow).arg("a_to_z_syn_counter").arg(0).query(con).unwrap();
-            let _: () = redis::cmd("HSET").arg(&flow).arg("z_to_a_syn_counter").arg(0).query(con).unwrap();
-            let _: () = redis::cmd("HSET").arg(&flow).arg("a_ip").arg(a_ip).query(con).unwrap();
-            let _: () = redis::cmd("HSET").arg(&flow).arg("z_ip").arg(z_ip).query(con).unwrap();
-            return true
-        }
-    }
-}
 
 fn parse_tcp_ipv4_datagram(ethernet: &EthernetPacket) -> Option<TcpDatagram> {
     if let Some(header) = Ipv4Packet::new(ethernet.payload()) {
@@ -142,11 +86,6 @@ fn main() {
     let args = App::from(yaml).get_matches();
 
 
-    let mut redis_conn = connect_redis();
-    if let Some(keys) = get_redis_keys(&mut redis_conn){
-        println!("{:?}", keys);
-    } 
-
     let ipv4: &str = args
         .value_of("ipv4")
         .unwrap_or("*");
@@ -176,6 +115,8 @@ fn main() {
 
     let local_ipv4 = get_local_ipv4(&interface).expect("Could not identify local Ipv4 address for interface");
 
+    let mut tcp_db: TcpDatabase = TcpDatabase::new();
+
     loop {
         match rx.next() {
             Ok(packet) => { 
@@ -202,7 +143,10 @@ fn main() {
                     match flow_direction.as_str() {
                         "a_to_z" => {
                             let tcp_connection = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
-                            if add_tcp_connection(&mut redis_conn, &tcp_connection) {
+                            let flow = tcp_connection.get_flow();
+                            let a_ip = tcp_connection.get_a_ip();
+                            let z_ip = tcp_connection.get_z_ip();
+                            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
 
                             } else {
 
@@ -210,10 +154,13 @@ fn main() {
                         }
                         "z_to_a" => {
                             let tcp_connection = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
-                            if add_tcp_connection(&mut redis_conn, &tcp_connection) {
+                            let flow = tcp_connection.get_flow();
+                            let a_ip = tcp_connection.get_a_ip();
+                            let z_ip = tcp_connection.get_z_ip();
+                            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
                                 
                             } else {
-                                if let Some(counter) = increment_z_to_a_syn_counter(&mut redis_conn, &tcp_connection) {
+                                if let Some(counter) = tcp_db.increment_z_to_a_syn_counter(&flow) {
                                     debug!("{} | z_to_a_syn_counter: {}", flow, counter);
                                     if counter >= 3 {
                                         warn!("{} | 3 or more unanswered SYN packets", flow);

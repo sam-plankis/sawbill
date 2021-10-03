@@ -80,6 +80,44 @@ fn identify_flow_direction(local_ipv4: &String, tcp_datagram: &TcpDatagram) -> O
     None
 }
 
+fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datagram: TcpDatagram) {
+    let src_ip = tcp_datagram.get_src_ip();
+    let src_port = tcp_datagram.get_src_port();
+    let dst_ip = tcp_datagram.get_dst_ip();
+    let dst_port = tcp_datagram.get_dst_port();
+    let flow_direction = identify_flow_direction(local_ipv4, &tcp_datagram).unwrap();
+    match flow_direction.as_str() {
+        "a_to_z" => {
+            let tcp_connection = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
+            let flow = tcp_connection.get_flow();
+            let a_ip = tcp_connection.get_a_ip();
+            let z_ip = tcp_connection.get_z_ip();
+            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
+
+            } else {
+
+            }
+        }
+        "z_to_a" => {
+            let tcp_connection = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
+            let flow = tcp_connection.get_flow();
+            let a_ip = tcp_connection.get_a_ip();
+            let z_ip = tcp_connection.get_z_ip();
+            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
+                
+            } else {
+                if let Some(counter) = tcp_db.increment_z_to_a_syn_counter(&flow) {
+                    debug!("{} | z_to_a_syn_counter: {}", flow, counter);
+                    if counter >= 3 {
+                        warn!("{} | 3 or more unanswered SYN packets", flow);
+                    }
+                }
+            }
+        }
+        _ => {  }
+    }
+}
+
 fn main() {
     env_logger::init();
     let yaml = load_yaml!("cli.yml");
@@ -134,42 +172,7 @@ fn main() {
                     if flow.contains("6379") {
                         continue
                     }
-
-                    let src_ip = tcp_datagram.get_src_ip();
-                    let src_port = tcp_datagram.get_src_port();
-                    let dst_ip = tcp_datagram.get_dst_ip();
-                    let dst_port = tcp_datagram.get_dst_port();
-                    let flow_direction = identify_flow_direction(&local_ipv4, &tcp_datagram).unwrap();
-                    match flow_direction.as_str() {
-                        "a_to_z" => {
-                            let tcp_connection = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
-                            let flow = tcp_connection.get_flow();
-                            let a_ip = tcp_connection.get_a_ip();
-                            let z_ip = tcp_connection.get_z_ip();
-                            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
-
-                            } else {
-
-                            }
-                        }
-                        "z_to_a" => {
-                            let tcp_connection = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
-                            let flow = tcp_connection.get_flow();
-                            let a_ip = tcp_connection.get_a_ip();
-                            let z_ip = tcp_connection.get_z_ip();
-                            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
-                                
-                            } else {
-                                if let Some(counter) = tcp_db.increment_z_to_a_syn_counter(&flow) {
-                                    debug!("{} | z_to_a_syn_counter: {}", flow, counter);
-                                    if counter >= 3 {
-                                        warn!("{} | 3 or more unanswered SYN packets", flow);
-                                    }
-                                }
-                            }
-                        }
-                        _ => {  }
-                    }
+                    process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram);
                 }
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),

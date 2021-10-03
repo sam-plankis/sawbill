@@ -1,0 +1,19 @@
+name: sawbill
+version: "0.1.0"
+author: Sam Plankis <sam-plankis@pm.me>
+about: Network analysis and visualization tool.
+args:
+    - interface:
+        help: Interface to process.
+        required: true
+        index: 1
+    - ipv4:
+        short: ipv4
+        long: ipv4
+        help: Process specific IPv4 address.
+        required: false
+        takes_value: true
+    - verbose:
+        short: v
+        multiple: true
+        help: Sets the level of verbosity

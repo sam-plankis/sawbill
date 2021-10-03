@@ -1,5 +1,5 @@
 [package]
-name = "sawbill"
+name = "sawbill-cli"
 version = "0.1.0"
 edition = "2018"
 
@@ -7,6 +7,10 @@ edition = "2018"
 
 [dependencies]
 regex = "1"
+log = "0.4"
+env_logger = "0.8.3"
+indexmap = "1.6.2"
+clap = { version = "*", features = ["yaml"] }
 
 [dependencies.pnet]
 version = "0.28.0"

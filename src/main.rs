@@ -2,6 +2,7 @@ extern crate pnet;
 extern crate redis;
 
 use crate::redis::Commands;
+use redis::RedisResult;
 use regex::Regex;
 
 use pnet::datalink::{self, NetworkInterface};
@@ -259,6 +260,14 @@ fn increment_conn_bytes(con: &mut redis::Connection, conn_key: &String, bytes: u
     Ok(())
 }
 
+fn get_redis_keys(con: &mut redis::Connection) -> Option<Vec<String>> {
+    if let Some(keys) = redis::cmd("KEYS")
+        .arg("*")
+        .query(con)
+        .expect("Could not get redis keys") { return Some(keys) }
+    None
+}
+
 pub struct ConnBytes {
     conn: String,
     bytes: usize,
@@ -318,6 +327,9 @@ fn main() {
     let conn_key = format!("{}:{}::{}:{}", src_ip, src_port, dst_ip, dst_port);
 
     let mut redis_conn = connect_redis();
+    if let Some(keys) = get_redis_keys(&mut redis_conn){
+        println!("{:?}", keys);
+    } 
     let iface_name = match env::args().nth(1) {
         Some(n) => n,
         None => {

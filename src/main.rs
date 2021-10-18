@@ -152,8 +152,11 @@ fn main() {
     };
 
     let local_ipv4 = get_local_ipv4(&interface).expect("Could not identify local Ipv4 address for interface");
-
     let mut tcp_db: TcpDatabase = TcpDatabase::new();
+
+    if let Some(keys) = tcp_db.get_redis_keys() {
+        debug!("{:#?}", keys)
+    }
 
     loop {
         match rx.next() {
@@ -169,7 +172,9 @@ fn main() {
                             }
                         }
                     }
+                    // Exclude the redis connection itself.
                     if flow.contains("6379") {
+                        debug!("Skipped redis packet");
                         continue
                     }
                     process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram);

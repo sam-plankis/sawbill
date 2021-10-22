@@ -48,6 +48,16 @@ impl TcpConnection {
         flows
     }
 
+    pub fn get_a_z_flow(&self) -> String {
+        let a_z_flow = format!("{}:{}->{}:{}", self.a_ip, self.a_port, self.z_ip, self.z_port);
+        a_z_flow
+    }
+
+    pub fn get_z_a_flow(&self) -> String {
+        let z_a_flow = format!("{}:{}->{}:{}", self.z_ip, self.z_port, self.a_ip, self.a_port);
+        z_a_flow
+    }
+
     pub fn get_a_ip(&self) -> String {
         self.a_ip.clone()
     }

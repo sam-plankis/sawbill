@@ -1,4 +1,8 @@
+use log::{debug, error, log_enabled, info, Level, warn};
 use std::net::IpAddr;
+use pnet::packet::Packet;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::tcp::TcpPacket;
 
 #[derive(Debug)]
 pub struct TcpDatagram{
@@ -13,9 +17,17 @@ pub struct TcpDatagram{
 }
 
 impl TcpDatagram {
-    pub fn new(src_ip: IpAddr, src_port: u16, dst_ip: IpAddr, dst_port: u16, bytes: u32, flags: u16) -> Self {
-        let ack_num: u32= 0;
-        let seq_num: u32= 0;
+    pub fn new(packet: Ipv4Packet) -> Self {
+        let src_ip = IpAddr::V4(packet.get_source());
+        let dst_ip = IpAddr::V4(packet.get_destination());
+        let payload= packet.payload();
+        let bytes = payload.len() as u32;
+        let tcp = TcpPacket::new(payload).expect("Could not parse TCP datagram!");
+        let flags: u16 = tcp.get_flags();
+        let dst_port: u16 = tcp.get_destination();
+        let src_port: u16 = tcp.get_source();
+        let ack_num: u32 = tcp.get_acknowledgement();
+        let seq_num: u32 = tcp.get_sequence();
         Self {
             src_ip,
             src_port,

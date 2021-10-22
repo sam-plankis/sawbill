@@ -20,7 +20,9 @@ impl TcpDatabase {
             .arg("z_to_a_syn_counter")
             .arg(1)
             .query(&mut self.connection)
-            .unwrap() { return Some(counter) }
+            .unwrap() { 
+                return Some(counter) 
+            }
         None
     }
     
@@ -29,7 +31,9 @@ impl TcpDatabase {
             .arg(&flow)
             .arg("z_to_a_syn_counter")
             .query(&mut self.connection)
-            .unwrap() { return Some(counter) }
+            .unwrap() { 
+                return Some(counter) 
+            }
         None
     }
     
@@ -37,7 +41,9 @@ impl TcpDatabase {
         if let Some(keys) = redis::cmd("KEYS")
             .arg("*")
             .query(&mut self.connection)
-            .expect("Could not get redis keys") { return Some(keys) }
+            .expect("Could not get redis keys") { 
+                return Some(keys) 
+            }
         None
     }
     
@@ -46,7 +52,9 @@ impl TcpDatabase {
         match result {
     
             // Connection already exists.
-            Ok(_) => { return false; }
+            Ok(_) => { 
+                return false; 
+            }
     
             // Create the connection.
             Err(_) => {

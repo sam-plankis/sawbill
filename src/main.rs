@@ -30,20 +30,11 @@ use log::{debug, error, log_enabled, info, Level, warn};
 
 
 fn parse_tcp_ipv4_datagram(ethernet: &EthernetPacket) -> Option<TcpDatagram> {
-    if let Some(header) = Ipv4Packet::new(ethernet.payload()) {
-        let src_ip = IpAddr::V4(header.get_source());
-        let dst_ip = IpAddr::V4(header.get_destination());
-        let packet = header.payload();
-        let bytes = packet.len() as u32;
-        match header.get_next_level_protocol() {
+    if let Some(packet) = Ipv4Packet::new(ethernet.payload()) {
+        match packet.get_next_level_protocol() {
             IpNextHeaderProtocols::Tcp => {
-                if let Some(tcp) = TcpPacket::new(packet) {
-                    let flags = tcp.get_flags();
-                    let dst_port = tcp.get_destination();
-                    let src_port = tcp.get_source();
-                    let tcp_datagram= TcpDatagram::new(src_ip, src_port, dst_ip, dst_port, bytes, flags);
-                    return Some(tcp_datagram)
-                }
+                let tcp_datagram = TcpDatagram::new(packet);
+                return Some(tcp_datagram)
             }
             IpNextHeaderProtocols::Udp => { }
             _ => return None
@@ -69,14 +60,11 @@ fn identify_flow_direction(local_ipv4: &String, tcp_datagram: &TcpDatagram) -> O
     let src_ip = tcp_datagram.get_src_ip();
     let dst_ip = tcp_datagram.get_dst_ip();
     if local_ipv4 == &dst_ip {
-        debug!("Flow determination | local {} | src {} | dst {} | a_to_z", local_ipv4, src_ip, dst_ip);
         return Some("a_to_z".to_string())
     }
     if local_ipv4 == &src_ip {
-        debug!("Flow determination | local {} | src {} | dst {} | z_to_a", local_ipv4, src_ip, dst_ip);
         return Some("z_to_a".to_string())
     }
-    debug!("Flow determination | local {} | src {} | dst {} | failed", local_ipv4, src_ip, dst_ip);
     None
 }
 
@@ -107,9 +95,8 @@ fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datag
                 
             } else {
                 if let Some(counter) = tcp_db.increment_z_to_a_syn_counter(&flow) {
-                    debug!("{} | z_to_a_syn_counter: {}", flow, counter);
-                    if counter >= 3 {
-                        warn!("{} | 3 or more unanswered SYN packets", flow);
+                    if counter == 3 {
+                        warn!("{} | 3 unanswered SYN packets", flow);
                     }
                 }
             }

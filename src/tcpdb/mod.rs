@@ -1,5 +1,7 @@
+use log::{debug, error, log_enabled, info, Level, warn};
 
 extern crate redis;
+
 
 pub struct TcpDatabase{
     connection: redis::Connection
@@ -12,6 +14,61 @@ impl TcpDatabase {
         Self {
             connection,
         }
+    }
+
+    fn _add_u32_to_array(&mut self, key: String, num: u32) -> Option<i32> {
+        if let Some(counter) = redis::cmd("LPUSH")
+            .arg(key)
+            .arg(num)
+            .query(&mut self.connection)
+            .unwrap() { 
+                return Some(counter) 
+            }
+        None
+    }
+
+    pub fn add_a_z_seq_num(&mut self, flow: &String, seq_num: u32) -> Option<i32> {
+        let key: String = format!("{}_a_z_seq_nums", flow);
+        if let Some(counter) = self._add_u32_to_array(key, seq_num) {
+            return Some(counter)
+        } 
+        None
+    }
+
+    pub fn add_a_z_ack_num(&mut self, flow: &String, ack_num: u32) -> Option<i32> {
+        let key: String = format!("{}_a_z_ack_nums", flow);
+        if let Some(counter) = self._add_u32_to_array(key, ack_num) {
+            return Some(counter)
+        } 
+        None
+    }
+
+    pub fn add_z_a_seq_num(&mut self, flow: &String, seq_num: u32) -> Option<i32> {
+        let key: String = format!("{}_z_a_seq_nums", flow);
+        if let Some(counter) = self._add_u32_to_array(key, seq_num) {
+            return Some(counter)
+        } 
+        None
+    }
+
+    pub fn add_z_a_ack_num(&mut self, flow: &String, ack_num: u32) -> Option<i32> {
+        let key: String = format!("{}_z_a_ack_nums", flow);
+        if let Some(counter) = self._add_u32_to_array(key, ack_num) {
+            return Some(counter)
+        } 
+        None
+    }
+
+    pub fn increment_a_to_z_syn_counter(&mut self, flow: &String) -> Option<i32> {
+        if let Some(counter) = redis::cmd("HINCRBY")
+            .arg(&flow)
+            .arg("a_to_z_syn_counter")
+            .arg(1)
+            .query(&mut self.connection)
+            .unwrap() { 
+                return Some(counter) 
+            }
+        None
     }
 
     pub fn increment_z_to_a_syn_counter(&mut self, flow: &String) -> Option<i32> {
@@ -62,6 +119,7 @@ impl TcpDatabase {
                 let _: () = redis::cmd("HSET").arg(&flow).arg("z_to_a_syn_counter").arg(0).query(&mut self.connection).unwrap();
                 let _: () = redis::cmd("HSET").arg(&flow).arg("a_ip").arg(a_ip).query(&mut self.connection).unwrap();
                 let _: () = redis::cmd("HSET").arg(&flow).arg("z_ip").arg(z_ip).query(&mut self.connection).unwrap();
+                debug!("Added flow: {}", flow);
                 return true
             }
         }

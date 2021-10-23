@@ -68,40 +68,53 @@ fn identify_flow_direction(local_ipv4: &String, tcp_datagram: &TcpDatagram) -> O
     None
 }
 
-fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datagram: TcpDatagram) {
+fn process_a_z_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection, tcp_datagram: TcpDatagram) -> () {
+    let flow = tcp_connection.get_flow();
+    let a_ip = tcp_connection.get_a_ip();
+    let z_ip = tcp_connection.get_z_ip();
+    tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip);
+    tcp_db.add_a_z_seq_num(&flow, tcp_datagram.get_seq_num());
+    tcp_db.add_a_z_ack_num(&flow, tcp_datagram.get_ack_num());
+    if let Some(counter) = tcp_db.increment_a_to_z_syn_counter(&flow) {
+        if counter == 3 {
+            warn!("{} | 3 unanswered SYN packets", flow);
+        }
+    }
+}
+
+fn process_z_a_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection, tcp_datagram: TcpDatagram) -> () {
+    let flow = tcp_connection.get_flow();
+    let a_ip = tcp_connection.get_a_ip();
+    let z_ip = tcp_connection.get_z_ip();
+    tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip);
+    tcp_db.add_z_a_seq_num(&flow, tcp_datagram.get_seq_num());
+    tcp_db.add_z_a_ack_num(&flow, tcp_datagram.get_ack_num());
+    if let Some(counter) = tcp_db.increment_z_to_a_syn_counter(&flow) {
+        if counter == 3 {
+            warn!("{} | 3 unanswered SYN packets", flow);
+        }
+    }
+}
+
+fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datagram: TcpDatagram) -> () {
     let src_ip = tcp_datagram.get_src_ip();
     let src_port = tcp_datagram.get_src_port();
     let dst_ip = tcp_datagram.get_dst_ip();
     let dst_port = tcp_datagram.get_dst_port();
-    let flow_direction = identify_flow_direction(local_ipv4, &tcp_datagram).unwrap();
-    match flow_direction.as_str() {
-        "a_to_z" => {
-            let tcp_connection = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
-            let flow = tcp_connection.get_flow();
-            let a_ip = tcp_connection.get_a_ip();
-            let z_ip = tcp_connection.get_z_ip();
-            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
-
-            } else {
-
+    if let Some(flow_direction) = identify_flow_direction(local_ipv4, &tcp_datagram) {
+        match flow_direction.as_str() {
+            "a_to_z" => {
+                let tcp_conn = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
+                process_a_z_datagram(tcp_db, &tcp_conn, tcp_datagram);
             }
-        }
-        "z_to_a" => {
-            let tcp_connection = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
-            let flow = tcp_connection.get_flow();
-            let a_ip = tcp_connection.get_a_ip();
-            let z_ip = tcp_connection.get_z_ip();
-            if tcp_db.add_tcp_connection(&flow, &a_ip, &z_ip) {
-                
-            } else {
-                if let Some(counter) = tcp_db.increment_z_to_a_syn_counter(&flow) {
-                    if counter == 3 {
-                        warn!("{} | 3 unanswered SYN packets", flow);
-                    }
-                }
+            "z_to_a" => {
+                let tcp_conn = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
+                process_z_a_datagram(tcp_db, &tcp_conn, tcp_datagram);
             }
-        }
-        _ => {  }
+            _ => { } 
+        } 
+    } else {
+        error!("Unable to identify flow direction!")
     }
 }
 

@@ -44,6 +44,14 @@ impl TcpDatagram {
         format!("{}:{}->{}:{}", self.src_ip, self.src_port, self.dst_ip, self.dst_port)
     }
 
+    pub fn get_seq_num(&self) -> u32 {
+        self.seq_num
+    }
+
+    pub fn get_ack_num(&self) -> u32 {
+        self.ack_num
+    }
+
     pub fn get_bytes(&self) -> u32 {
         self.bytes
     }

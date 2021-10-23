@@ -97,6 +97,8 @@ fn process_z_a_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection
 }
 
 fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datagram: TcpDatagram) -> () {
+    debug!("{:#?}", tcp_datagram.get_offset());
+    debug!("{:#?}", tcp_datagram.get_options());
     let src_ip = tcp_datagram.get_src_ip();
     let src_port = tcp_datagram.get_src_port();
     let dst_ip = tcp_datagram.get_dst_ip();

@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use pnet::packet::Packet;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
+use pnet::packet::tcp::TcpOption;
 
 #[derive(Debug)]
 pub struct TcpDatagram{
@@ -14,6 +15,8 @@ pub struct TcpDatagram{
     ack_num: u32,
     seq_num: u32,
     flags: u16,
+    options: Vec<TcpOption>,
+    offset: u8,
 }
 
 impl TcpDatagram {
@@ -28,6 +31,8 @@ impl TcpDatagram {
         let src_port: u16 = tcp.get_source();
         let ack_num: u32 = tcp.get_acknowledgement();
         let seq_num: u32 = tcp.get_sequence();
+        let options: Vec<TcpOption> = tcp.get_options();
+        let offset: u8 = tcp.get_data_offset();
         Self {
             src_ip,
             src_port,
@@ -37,7 +42,17 @@ impl TcpDatagram {
             ack_num, 
             seq_num,
             flags, 
+            options,
+            offset,
         }
+    }
+
+    pub fn get_offset(&self) -> u8 {
+        self.offset
+    }
+
+    pub fn get_options(&self) -> &Vec<TcpOption> {
+        &self.options
     }
 
     pub fn get_flow(&self) -> String {

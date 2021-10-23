@@ -104,14 +104,12 @@ impl TcpDatabase {
         None
     }
     
-    pub fn add_tcp_connection(&mut self, flow: &String, a_ip: &String, z_ip: &String) -> bool {
+    pub fn add_tcp_connection(&mut self, flow: &String, a_ip: &String, z_ip: &String) {
         let result: redis::RedisResult<String> = redis::cmd("HGET").arg(&flow).arg("a_ip").query(&mut self.connection);
         match result {
     
             // Connection already exists.
-            Ok(_) => { 
-                return false; 
-            }
+            Ok(_) => { }
     
             // Create the connection.
             Err(_) => {
@@ -120,7 +118,6 @@ impl TcpDatabase {
                 let _: () = redis::cmd("HSET").arg(&flow).arg("a_ip").arg(a_ip).query(&mut self.connection).unwrap();
                 let _: () = redis::cmd("HSET").arg(&flow).arg("z_ip").arg(z_ip).query(&mut self.connection).unwrap();
                 debug!("Added flow: {}", flow);
-                return true
             }
         }
     }

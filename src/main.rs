@@ -19,11 +19,14 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use pnet::util::MacAddr;
 use tokio::sync::futures;
+use warp::reply::{json, Reply};
 
+use std::cell::Cell;
 use std::env;
 use std::fmt::Result;
 use std::io::{self, Write};
 use std::net::IpAddr;
+use std::ops::Deref;
 use std::process;
 
 use env_logger;
@@ -180,23 +183,23 @@ async fn main() {
         debug!("{:#?}", keys)
     }
 
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
-    let latest_tcp_conn = Arc::new(Mutex::new(None));
+    // use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    // use tokio::sync::Mutex;
+    let mut latest_tcp_conn: Arc<Mutex<Option<TcpConnection>>>;
+    latest_tcp_conn = Arc::new(Mutex::new(None));
 
     use std::time::Duration;
     use tokio::time::sleep;
 
+    #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    struct ExampleJson {
+        name: String,
+        age: u8,
+    }
+
     use warp::Filter;
     let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
-    // let conn = warp::path!("conn").and_then(|| async move {
-    //     let lock = latest_tcp_conn.clone();
-    //     let lock = lock.lock().await;
-    //     match &*lock {
-    //         Some(tcp_conn) => Ok(warp::reply::json(&tcp_conn)),
-    //         None => Err(warp::reject::reject()),
-    //     }
-    // });
 
     tokio::select! {
         _ = async {loop {
@@ -220,17 +223,28 @@ async fn main() {
                         debug!("Skipped redis packet");
                         continue;
                     }
-                    let tcp_conn = process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram);
-                    info!("{} | {:#?}", flow, tcp_conn);
-                    let mut lock = latest_tcp_conn.lock().await;
-                    *lock = tcp_conn;
+                    if let Some(tcp_conn) = process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram) {
+                        let mut conn_lock = latest_tcp_conn.deref().lock().unwrap();
+                        *conn_lock = Some(tcp_conn);
+                    }
                 }
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),
         }
     }} => {},
     _ = async {loop {
-        warp::serve(hello).run(([127, 0, 0, 1], 3030)).await;
+        let latest_clone = latest_tcp_conn.clone();
+        let conn = warp::path!("conn").map(move || {
+            match latest_clone.deref().lock().unwrap().deref() {
+                Some(tcp_conn) => Ok(warp::reply::json(&tcp_conn).into_response()),
+                // None => Err(warp::reject::reject()),
+                None => {
+                    let empty: Vec<u8> = Vec::new();
+                    Ok(warp::reply::json(&empty).into_response())
+                }
+            }
+        });
+        warp::serve(conn).run(([127, 0, 0, 1], 3030)).await;
     }} => {},
     }
 }

@@ -14,7 +14,7 @@ pub struct TcpDatagram{
     bytes: u32,
     ack_num: u32,
     seq_num: u32,
-    flags: u16,
+    flags: u8,
     options: Vec<TcpOption>,
     offset: u8,
 }
@@ -26,7 +26,7 @@ impl TcpDatagram {
         let payload= packet.payload();
         let bytes = payload.len() as u32;
         let tcp = TcpPacket::new(payload).expect("Could not parse TCP datagram!");
-        let flags: u16 = tcp.get_flags();
+        let flags: u8 = tcp.get_flags();
         let dst_port: u16 = tcp.get_destination();
         let src_port: u16 = tcp.get_source();
         let ack_num: u32 = tcp.get_acknowledgement();

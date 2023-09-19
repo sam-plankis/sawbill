@@ -117,7 +117,7 @@ impl TcpDatabase {
                 let _: () = redis::cmd("HSET").arg(&flow).arg("z_to_a_syn_counter").arg(0).query(&mut self.connection).unwrap();
                 let _: () = redis::cmd("HSET").arg(&flow).arg("a_ip").arg(a_ip).query(&mut self.connection).unwrap();
                 let _: () = redis::cmd("HSET").arg(&flow).arg("z_ip").arg(z_ip).query(&mut self.connection).unwrap();
-                debug!("Added flow: {}", flow);
+                info!("Added flow: {}", flow);
             }
         }
     }

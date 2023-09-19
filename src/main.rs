@@ -1,11 +1,11 @@
 extern crate pnet;
 extern crate redis;
-mod datagram;
 mod connection;
+mod datagram;
 mod tcpdb;
 
-use datagram::TcpDatagram;
 use connection::TcpConnection;
+use datagram::TcpDatagram;
 use tcpdb::TcpDatabase;
 
 use regex::Regex;
@@ -24,20 +24,28 @@ use std::io::{self, Write};
 use std::net::IpAddr;
 use std::process;
 
-use clap::{App, load_yaml};
 use env_logger;
-use log::{debug, error, log_enabled, info, Level, warn};
+use log::{debug, error, info, log_enabled, warn, Level};
 
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    interface: String,
+}
 
 fn parse_tcp_ipv4_datagram(ethernet: &EthernetPacket) -> Option<TcpDatagram> {
     if let Some(packet) = Ipv4Packet::new(ethernet.payload()) {
         match packet.get_next_level_protocol() {
             IpNextHeaderProtocols::Tcp => {
                 let tcp_datagram = TcpDatagram::new(packet);
-                return Some(tcp_datagram)
+                return Some(tcp_datagram);
             }
-            IpNextHeaderProtocols::Udp => { }
-            _ => return None
+            IpNextHeaderProtocols::Udp => {}
+            _ => return None,
         }
     }
     None
@@ -51,8 +59,8 @@ fn get_local_ipv4(interface: &NetworkInterface) -> Option<String> {
             let local_ipv4 = captures.get(0).unwrap().as_str().to_string();
             debug!("Found local Ipv4 address: {:#?}", local_ipv4);
             Some(local_ipv4)
-        },
-        None => None
+        }
+        None => None,
     }
 }
 
@@ -60,15 +68,19 @@ fn identify_flow_direction(local_ipv4: &String, tcp_datagram: &TcpDatagram) -> O
     let src_ip = tcp_datagram.get_src_ip();
     let dst_ip = tcp_datagram.get_dst_ip();
     if local_ipv4 == &dst_ip {
-        return Some("a_to_z".to_string())
+        return Some("a_to_z".to_string());
     }
     if local_ipv4 == &src_ip {
-        return Some("z_to_a".to_string())
+        return Some("z_to_a".to_string());
     }
     None
 }
 
-fn process_a_z_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection, tcp_datagram: TcpDatagram) -> () {
+fn process_a_z_datagram(
+    tcp_db: &mut TcpDatabase,
+    tcp_connection: &TcpConnection,
+    tcp_datagram: TcpDatagram,
+) -> () {
     let flow = tcp_connection.get_flow();
     let a_ip = tcp_connection.get_a_ip();
     let z_ip = tcp_connection.get_z_ip();
@@ -82,7 +94,11 @@ fn process_a_z_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection
     }
 }
 
-fn process_z_a_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection, tcp_datagram: TcpDatagram) -> () {
+fn process_z_a_datagram(
+    tcp_db: &mut TcpDatabase,
+    tcp_connection: &TcpConnection,
+    tcp_datagram: TcpDatagram,
+) -> () {
     let flow = tcp_connection.get_flow();
     let a_ip = tcp_connection.get_a_ip();
     let z_ip = tcp_connection.get_z_ip();
@@ -96,7 +112,11 @@ fn process_z_a_datagram(tcp_db: &mut TcpDatabase, tcp_connection: &TcpConnection
     }
 }
 
-fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datagram: TcpDatagram) -> () {
+fn process_tcp_datagram(
+    local_ipv4: &String,
+    tcp_db: &mut TcpDatabase,
+    tcp_datagram: TcpDatagram,
+) -> () {
     debug!("{:#?}", tcp_datagram.get_offset());
     debug!("{:#?}", tcp_datagram.get_options());
     let src_ip = tcp_datagram.get_src_ip();
@@ -113,27 +133,22 @@ fn process_tcp_datagram(local_ipv4: &String, tcp_db: &mut TcpDatabase, tcp_datag
                 let tcp_conn = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
                 process_z_a_datagram(tcp_db, &tcp_conn, tcp_datagram);
             }
-            _ => { } 
-        } 
+            _ => {}
+        }
     } else {
         error!("Unable to identify flow direction!")
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
-    let yaml = load_yaml!("cli.yml");
-    let args = App::from(yaml).get_matches();
+    let args = Args::parse();
 
+    // Make this an arg again
+    let ipv4: &str = "*";
 
-    let ipv4: &str = args
-        .value_of("ipv4")
-        .unwrap_or("*");
-
-    let iface_name: String = args
-        .value_of("interface")
-        .unwrap_or("lo0")
-        .to_string();
+    let iface_name: String = args.interface;
 
     // Find the network interface with the provided name
     use pnet::datalink::Channel::Ethernet;
@@ -144,40 +159,44 @@ fn main() {
         .filter(interface_names_match)
         .next()
         .unwrap_or_else(|| panic!("No such network interface: {}", iface_name));
-    
 
     // Create a channel to receive on
     let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
         Ok(Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("packetdump: unhandled channel type: {}"),
+        Ok(_) => panic!("packetdump: unhandled channel type"),
         Err(e) => panic!("packetdump: unable to create channel: {}", e),
     };
 
-    let local_ipv4 = get_local_ipv4(&interface).expect("Could not identify local Ipv4 address for interface");
+    let local_ipv4 =
+        get_local_ipv4(&interface).expect("Could not identify local Ipv4 address for interface");
     let mut tcp_db: TcpDatabase = TcpDatabase::new();
 
     if let Some(keys) = tcp_db.get_redis_keys() {
         debug!("{:#?}", keys)
     }
 
+    // use warp::Filter;
+    // let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
+    // warp::serve(hello).run(([127, 0, 0, 1], 3030)).await;
+
     loop {
         match rx.next() {
-            Ok(packet) => { 
+            Ok(packet) => {
                 let ethernet = &EthernetPacket::new(packet).unwrap();
                 if let Some(tcp_datagram) = parse_tcp_ipv4_datagram(&ethernet) {
                     let flow = tcp_datagram.get_flow();
                     match ipv4 {
-                        "*" => {{}}
+                        "*" => {}
                         _ => {
                             if !flow.contains(ipv4) {
-                                continue
+                                continue;
                             }
                         }
                     }
                     // Exclude the redis connection itself.
                     if flow.contains("6379") {
                         debug!("Skipped redis packet");
-                        continue
+                        continue;
                     }
                     process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram);
                 }

@@ -1,7 +1,9 @@
 
 use std::net::IpAddr;
 
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpConnection{
     a_ip: String,
     a_port: u16,

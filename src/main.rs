@@ -6,6 +6,7 @@ mod tcpdb;
 
 use connection::TcpConnection;
 use datagram::TcpDatagram;
+use pnet::packet::icmpv6::ndp::NdpOptionPacket;
 use tcpdb::TcpDatabase;
 
 use regex::Regex;
@@ -17,6 +18,7 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use pnet::util::MacAddr;
+use tokio::sync::futures;
 
 use std::env;
 use std::fmt::Result;
@@ -116,7 +118,7 @@ fn process_tcp_datagram(
     local_ipv4: &String,
     tcp_db: &mut TcpDatabase,
     tcp_datagram: TcpDatagram,
-) -> () {
+) -> Option<TcpConnection> {
     debug!("{:#?}", tcp_datagram.get_offset());
     debug!("{:#?}", tcp_datagram.get_options());
     let src_ip = tcp_datagram.get_src_ip();
@@ -128,15 +130,18 @@ fn process_tcp_datagram(
             "a_to_z" => {
                 let tcp_conn = TcpConnection::new(src_ip, src_port, dst_ip, dst_port);
                 process_a_z_datagram(tcp_db, &tcp_conn, tcp_datagram);
+                Some(tcp_conn.clone())
             }
             "z_to_a" => {
                 let tcp_conn = TcpConnection::new(dst_ip, dst_port, src_ip, src_port);
                 process_z_a_datagram(tcp_db, &tcp_conn, tcp_datagram);
+                Some(tcp_conn.clone())
             }
-            _ => {}
+            _ => None,
         }
     } else {
-        error!("Unable to identify flow direction!")
+        error!("Unable to identify flow direction!");
+        None
     }
 }
 
@@ -175,12 +180,29 @@ async fn main() {
         debug!("{:#?}", keys)
     }
 
-    // use warp::Filter;
-    // let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
-    // warp::serve(hello).run(([127, 0, 0, 1], 3030)).await;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    let latest_tcp_conn = Arc::new(Mutex::new(None));
 
-    loop {
-        match rx.next() {
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    use warp::Filter;
+    let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
+    // let conn = warp::path!("conn").and_then(|| async move {
+    //     let lock = latest_tcp_conn.clone();
+    //     let lock = lock.lock().await;
+    //     match &*lock {
+    //         Some(tcp_conn) => Ok(warp::reply::json(&tcp_conn)),
+    //         None => Err(warp::reject::reject()),
+    //     }
+    // });
+
+    tokio::select! {
+        _ = async {loop {
+            println!("Loop A");
+            sleep(Duration::from_millis(200)).await;
+            match rx.next() {
             Ok(packet) => {
                 let ethernet = &EthernetPacket::new(packet).unwrap();
                 if let Some(tcp_datagram) = parse_tcp_ipv4_datagram(&ethernet) {
@@ -198,10 +220,17 @@ async fn main() {
                         debug!("Skipped redis packet");
                         continue;
                     }
-                    process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram);
+                    let tcp_conn = process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram);
+                    info!("{} | {:#?}", flow, tcp_conn);
+                    let mut lock = latest_tcp_conn.lock().await;
+                    *lock = tcp_conn;
                 }
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),
         }
+    }} => {},
+    _ = async {loop {
+        warp::serve(hello).run(([127, 0, 0, 1], 3030)).await;
+    }} => {},
     }
 }

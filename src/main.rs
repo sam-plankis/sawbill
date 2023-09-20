@@ -33,6 +33,7 @@ use env_logger;
 use log::{debug, error, info, log_enabled, warn, Level};
 
 use clap::Parser;
+use serde_json;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -204,7 +205,7 @@ async fn main() {
     tokio::select! {
         _ = async {loop {
             println!("Loop A");
-            sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(1000)).await;
             match rx.next() {
             Ok(packet) => {
                 let ethernet = &EthernetPacket::new(packet).unwrap();
@@ -236,11 +237,20 @@ async fn main() {
         let latest_clone = latest_tcp_conn.clone();
         let conn = warp::path!("conn").map(move || {
             match latest_clone.deref().lock().unwrap().deref() {
-                Some(tcp_conn) => Ok(warp::reply::json(&tcp_conn).into_response()),
+                Some(tcp_conn) => {
+                    let pretty_conn = serde_json::to_string_pretty(&tcp_conn).unwrap();
+                    let response = warp::http::Response::builder()
+                        .header("content-type", "application/json")
+                        .body(warp::hyper::Body::from(pretty_conn));
+                    Ok(response)
+                },
                 // None => Err(warp::reject::reject()),
                 None => {
                     let empty: Vec<u8> = Vec::new();
-                    Ok(warp::reply::json(&empty).into_response())
+                    let response = warp::http::Response::builder()
+                        .header("content-type", "application/json")
+                        .body(warp::hyper::Body::from(empty));
+                    Ok(response)
                 }
             }
         });

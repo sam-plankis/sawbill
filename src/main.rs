@@ -1,8 +1,18 @@
+use anyhow;
+use tokio;
+#[macro_use]
+extern crate rocket;
 extern crate pnet;
 extern crate redis;
 mod connection;
 mod datagram;
 mod tcpdb;
+
+use std::os::unix::thread;
+// use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// use rocket::tokio::sync::{Arc};
+use rocket::futures::lock::Mutex;
 
 use connection::TcpConnection;
 use datagram::TcpDatagram;
@@ -15,7 +25,7 @@ use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::tcp::TcpPacket;
+use pnet::packet::tcp::{Tcp, TcpPacket};
 use pnet::packet::Packet;
 use pnet::util::MacAddr;
 use tokio::sync::futures;
@@ -23,7 +33,6 @@ use warp::reply::{json, Reply};
 
 use std::cell::Cell;
 use std::env;
-use std::fmt::Result;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use std::ops::Deref;
@@ -35,7 +44,8 @@ use log::{debug, error, info, log_enabled, warn, Level};
 use clap::Parser;
 use serde_json;
 
-/// Simple program to greet a person
+use rocket::serde::{Serialize, json::Json};
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -149,14 +159,103 @@ fn process_tcp_datagram(
     }
 }
 
-#[tokio::main]
-async fn main() {
-    env_logger::init();
-    let args = Args::parse();
+async fn lookup_ip(ip: &str) -> String {
+    let url = format!(
+        "http://demo.ip-api.com/json/{}?fields=66846719",
+        ip.to_string()
+    );
+    if let Ok(resp) = reqwest::get(url).await {
+        if let Ok(text) = resp.text().await {
+            let pretty = serde_json::to_string_pretty(&text).unwrap();
+            return pretty;
+        }
+    }
+    return "None".to_string();
+}
 
+#[get("/")]
+async fn index() -> &'static str {
+    "Hello, world!"
+}
+
+use serde_derive::Deserialize;
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpInfo {
+    pub status: String,
+    pub continent: String,
+    pub continent_code: String,
+    pub country: String,
+    pub country_code: String,
+    pub region: String,
+    pub region_name: String,
+    pub city: String,
+    pub district: String,
+    pub zip: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub timezone: String,
+    pub offset: i64,
+    pub currency: String,
+    pub isp: String,
+    pub org: String,
+    #[serde(rename = "as")]
+    pub as_field: String,
+    pub asname: String,
+    pub reverse: String,
+    pub mobile: bool,
+    pub proxy: bool,
+    pub hosting: bool,
+    pub query: String,
+}
+
+
+#[get("/conn")]
+async fn conn(latest_tcp: &rocket::State<Arc<Mutex<Option<TcpConnection>>>>) -> Option<String> {
+    // Just return a JSON array of todos, applying the limit and offset.
+    let conn_clone = latest_tcp.clone();
+    let mut guard = conn_clone.lock().await;
+    match &mut *guard {
+        Some(tcp_conn) => {
+            let ip = tcp_conn.get_a_ip().to_owned();
+            // let ip_info = lookup_ip(&ip).await;
+            // let pretty = serde_json::to_string_pretty(&ip_info).unwrap();
+            let url = format!(
+                "http://demo.ip-api.com/json/{}?fields=66846719",
+                ip.to_string()
+            );
+            println!("{}", url);
+            // println!("{} | {:#?}", flow, tcp_conn);
+            if let Ok(resp) = reqwest::get(url).await {
+                if let Ok(text) = resp.text().await {
+                    // let ip_info: Result<IpInfo, serde_json::Error> = serde_json::from_str(&text.as_str()).unwrap();
+                    // error!("{} | {:#?}", ip, text);
+                    // let text_json = serde_json::(text);
+                    // error!("{:#?}", text_json);
+                    // let pretty = serde_json::to_string_pretty(&text_json).unwrap();
+                    return Some(text);
+                }
+            }
+            return Some("None".to_string());
+        }
+        // None => Err(warp::reject::reject()),
+        None => {
+            let empty = "No latest conn".to_string();
+            let pretty = serde_json::to_string_pretty(&empty).unwrap();
+            Some(pretty)
+        }
+    }
+}
+
+async fn rx_loop(latest_tcp: Arc<Mutex<Option<TcpConnection>>>) {
+    println!("Starting rx loop");
+    let mut count = 0;
     // Make this an arg again
     let ipv4: &str = "*";
 
+    // env_logger::init();
+    let args = Args::parse();
     let iface_name: String = args.interface;
 
     // Find the network interface with the provided name
@@ -184,29 +283,8 @@ async fn main() {
         debug!("{:#?}", keys)
     }
 
-    // use std::sync::Arc;
-    use std::sync::{Arc, Mutex};
-    // use tokio::sync::Mutex;
-    let mut latest_tcp_conn: Arc<Mutex<Option<TcpConnection>>>;
-    latest_tcp_conn = Arc::new(Mutex::new(None));
-
-    use std::time::Duration;
-    use tokio::time::sleep;
-
-    #[derive(serde::Serialize, serde::Deserialize, Debug)]
-    struct ExampleJson {
-        name: String,
-        age: u8,
-    }
-
-    use warp::Filter;
-    let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
-
-    tokio::select! {
-        _ = async {loop {
-            println!("Loop A");
-            sleep(Duration::from_millis(1000)).await;
-            match rx.next() {
+    loop {
+        match rx.next() {
             Ok(packet) => {
                 let ethernet = &EthernetPacket::new(packet).unwrap();
                 if let Some(tcp_datagram) = parse_tcp_ipv4_datagram(&ethernet) {
@@ -224,37 +302,43 @@ async fn main() {
                         debug!("Skipped redis packet");
                         continue;
                     }
-                    if let Some(tcp_conn) = process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram) {
-                        let mut conn_lock = latest_tcp_conn.deref().lock().unwrap();
+                    if let Some(tcp_conn) =
+                        process_tcp_datagram(&local_ipv4, &mut tcp_db, tcp_datagram)
+                    {
+                        count += 1;
+                        debug!("Count: {}", count);
+                        // println!("{} | {:#?}", flow, tcp_conn);
+                        // *latest_tcp.lock().unwrap() = Some(tcp_conn);
+                        let latest_clone = latest_tcp.clone();
+                        let mut conn_lock = latest_clone.deref().lock().await;
                         *conn_lock = Some(tcp_conn);
                     }
                 }
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),
         }
-    }} => {},
-    _ = async {loop {
-        let latest_clone = latest_tcp_conn.clone();
-        let conn = warp::path!("conn").map(move || {
-            match latest_clone.deref().lock().unwrap().deref() {
-                Some(tcp_conn) => {
-                    let pretty_conn = serde_json::to_string_pretty(&tcp_conn).unwrap();
-                    let response = warp::http::Response::builder()
-                        .header("content-type", "application/json")
-                        .body(warp::hyper::Body::from(pretty_conn));
-                    Ok(response)
-                },
-                // None => Err(warp::reject::reject()),
-                None => {
-                    let empty: Vec<u8> = Vec::new();
-                    let response = warp::http::Response::builder()
-                        .header("content-type", "application/json")
-                        .body(warp::hyper::Body::from(empty));
-                    Ok(response)
-                }
-            }
-        });
-        warp::serve(conn).run(([127, 0, 0, 1], 3030)).await;
-    }} => {},
     }
+}
+
+#[rocket::main]
+async fn main() -> anyhow::Result<()> {
+    // Shared state between threads
+    let latest_tcp: Arc<Mutex<Option<TcpConnection>>>;
+    latest_tcp = Arc::new(Mutex::new(None));
+
+    // Build and launch the Rocket web server
+    let clone1 = latest_tcp.clone();
+    let rocket = rocket::build()
+        .manage(clone1)
+        .mount("/", routes![index, conn]);
+    let thread1 = rocket::tokio::spawn(rocket.launch());
+
+    // Launch the packet capture thread
+    let clone2 = latest_tcp.clone();
+    let _ = rocket::tokio::task::spawn(async move { rx_loop(clone2).await });
+
+    // Await the Rocket thread ONLY so Ctrl-C works
+    _ = thread1.await.unwrap();
+
+    Ok(())
 }

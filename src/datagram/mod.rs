@@ -1,12 +1,11 @@
-use log::{debug, error, log_enabled, info, Level, warn};
-use std::net::IpAddr;
-use pnet::packet::Packet;
 use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::tcp::TcpPacket;
 use pnet::packet::tcp::TcpOption;
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::Packet;
+use std::net::IpAddr;
 
 #[derive(Debug)]
-pub struct TcpDatagram{
+pub struct TcpDatagram {
     src_ip: IpAddr,
     src_port: u16,
     dst_ip: IpAddr,
@@ -23,7 +22,7 @@ impl TcpDatagram {
     pub fn new(packet: Ipv4Packet) -> Self {
         let src_ip = IpAddr::V4(packet.get_source());
         let dst_ip = IpAddr::V4(packet.get_destination());
-        let payload= packet.payload();
+        let payload = packet.payload();
         let bytes = payload.len() as u32;
         let tcp = TcpPacket::new(payload).expect("Could not parse TCP datagram!");
         let flags: u8 = tcp.get_flags();
@@ -38,10 +37,10 @@ impl TcpDatagram {
             src_port,
             dst_ip,
             dst_port,
-            bytes, 
-            ack_num, 
+            bytes,
+            ack_num,
             seq_num,
-            flags, 
+            flags,
             options,
             offset,
         }
@@ -56,7 +55,10 @@ impl TcpDatagram {
     }
 
     pub fn get_flow(&self) -> String {
-        format!("{}:{}->{}:{}", self.src_ip, self.src_port, self.dst_ip, self.dst_port)
+        format!(
+            "{}:{}->{}:{}",
+            self.src_ip, self.src_port, self.dst_ip, self.dst_port
+        )
     }
 
     pub fn get_seq_num(&self) -> u32 {
@@ -89,8 +91,8 @@ impl TcpDatagram {
 
     pub fn is_syn(&self) -> bool {
         match self.flags {
-            2 => { true }
-            _ => { false }
+            2 => true,
+            _ => false,
         }
     }
 }

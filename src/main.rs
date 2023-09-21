@@ -5,17 +5,10 @@ extern crate pnet;
 extern crate redis;
 use anyhow;
 
-
-
 use rocket::futures::lock::Mutex;
 use std::sync::Arc;
 
 use connection::TcpConnection;
-
-
-
-use env_logger;
-use log::{debug, error, info, log_enabled, warn, Level};
 
 use clap::Parser;
 use serde_json;
@@ -139,7 +132,7 @@ async fn conn(
         }
         None => {
             let empty = "No latest conn".to_string();
-            let pretty = serde_json::to_string_pretty(&empty).unwrap();
+            let _pretty = serde_json::to_string_pretty(&empty).unwrap();
             return None;
         }
     }
@@ -154,14 +147,12 @@ struct Args {
     ipv4: String,
 }
 
-
 #[rocket::main]
 async fn main() -> anyhow::Result<()> {
     // env_logger::init();
     let args = Args::parse();
     let iface_name: String = args.interface;
     let ipv4: String = args.ipv4;
-
 
     // Shared state between threads
     let latest_tcp: Arc<Mutex<Option<TcpConnection>>>;

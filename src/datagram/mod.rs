@@ -4,18 +4,17 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use std::net::IpAddr;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpDatagram {
-    src_ip: IpAddr,
-    src_port: u16,
-    dst_ip: IpAddr,
-    dst_port: u16,
-    bytes: u32,
-    ack_num: u32,
-    seq_num: u32,
-    flags: u8,
-    options: Vec<TcpOption>,
-    offset: u8,
+    pub src_ip: IpAddr,
+    pub src_port: u16,
+    pub dst_ip: IpAddr,
+    pub dst_port: u16,
+    pub bytes: u32,
+    pub ack_num: u32,
+    pub seq_num: u32,
+    pub flags: u8,
+    pub offset: u8,
 }
 
 impl TcpDatagram {
@@ -30,7 +29,6 @@ impl TcpDatagram {
         let src_port: u16 = tcp.get_source();
         let ack_num: u32 = tcp.get_acknowledgement();
         let seq_num: u32 = tcp.get_sequence();
-        let options: Vec<TcpOption> = tcp.get_options();
         let offset: u8 = tcp.get_data_offset();
         Self {
             src_ip,
@@ -41,52 +39,12 @@ impl TcpDatagram {
             ack_num,
             seq_num,
             flags,
-            options,
             offset,
         }
     }
 
     pub fn get_offset(&self) -> u8 {
         self.offset
-    }
-
-    pub fn get_options(&self) -> &Vec<TcpOption> {
-        &self.options
-    }
-
-    pub fn get_flow(&self) -> String {
-        format!(
-            "{}:{}->{}:{}",
-            self.src_ip, self.src_port, self.dst_ip, self.dst_port
-        )
-    }
-
-    pub fn get_seq_num(&self) -> u32 {
-        self.seq_num
-    }
-
-    pub fn get_ack_num(&self) -> u32 {
-        self.ack_num
-    }
-
-    pub fn get_bytes(&self) -> u32 {
-        self.bytes
-    }
-
-    pub fn get_src_ip(&self) -> String {
-        format!("{}", self.src_ip)
-    }
-
-    pub fn get_dst_ip(&self) -> String {
-        format!("{}", self.dst_ip)
-    }
-
-    pub fn get_src_port(&self) -> u16 {
-        self.src_port
-    }
-
-    pub fn get_dst_port(&self) -> u16 {
-        self.dst_port
     }
 
     pub fn is_syn(&self) -> bool {

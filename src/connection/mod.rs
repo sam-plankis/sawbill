@@ -1,10 +1,16 @@
+use std::fmt::{Display, self, Formatter};
+
 use serde::{Deserialize, Serialize};
+
+use crate::datagram::TcpDatagram;
+
+use std::net::IpAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpConnection {
-    a_ip: String,
+    a_ip: IpAddr,
     a_port: u16,
-    z_ip: String,
+    z_ip: IpAddr,
     z_port: u16,
     //a_z_bytes: usize,
     //z_a_bytes: usize,
@@ -16,10 +22,21 @@ pub struct TcpConnection {
     //a_z_dup_seq_nums: Vec<u32>,
     //z_a_dup_seq_nums: Vec<u32>,
     flow: String,
+    datagrams: Vec<TcpDatagram>,
+}
+
+impl Display for TcpConnection {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}<->{}:{}",
+            self.a_ip, self.a_port, self.z_ip, self.z_port
+        )
+    }
 }
 
 impl TcpConnection {
-    pub fn new(a_ip: String, a_port: u16, z_ip: String, z_port: u16) -> Self {
+    pub fn new(a_ip: IpAddr, a_port: u16, z_ip: IpAddr, z_port: u16) -> Self {
         let z_a_syn_counter = 0;
         let a_z_syn_counter = 0;
         let flow: String = format!("{}:{}<->{}:{}", a_ip, a_port, z_ip, z_port);
@@ -31,7 +48,12 @@ impl TcpConnection {
             a_z_syn_counter,
             z_a_syn_counter,
             flow,
+            datagrams: Vec::new(),
         }
+    }
+
+    pub fn add(&mut self, tcp_datagram: TcpDatagram) {
+        self.datagrams.push(tcp_datagram);
     }
 
     pub fn get_flow(&self) -> String {
@@ -69,19 +91,4 @@ impl TcpConnection {
         z_a_flow
     }
 
-    pub fn get_a_ip(&self) -> String {
-        self.a_ip.clone()
-    }
-
-    pub fn get_z_ip(&self) -> String {
-        self.z_ip.clone()
-    }
-
-    pub fn get_a_port(&self) -> u16 {
-        self.a_port
-    }
-
-    pub fn get_z_port(&self) -> u16 {
-        self.z_port
-    }
 }

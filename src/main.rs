@@ -5,8 +5,9 @@ extern crate pnet;
 extern crate redis;
 use anyhow;
 
+use regex::Regex;
 use rocket::futures::lock::Mutex;
-use std::sync::Arc;
+use std::{sync::Arc, net::{IpAddr, Ipv4Addr}};
 
 use connection::TcpConnection;
 
@@ -14,12 +15,16 @@ use clap::Parser;
 use serde_json;
 
 use rocket::serde::{json::Json, Serialize};
+use pnet::{datalink::{self, NetworkInterface}};
 
 mod connection;
 mod datagram;
 mod processor;
 use processor::process;
-mod tcpdb;
+mod tcp_db;
+use tcp_db::TcpDb;
+
+use pnet::datalink::Channel::Ethernet;
 
 async fn lookup_ip(ip: &str) -> String {
     let url = format!(
@@ -99,42 +104,35 @@ async fn reset_count(count: &rocket::State<Arc<Mutex<u32>>>) -> String {
     0.to_string()
 }
 
-#[get("/conn")]
+#[get("/tcpdb")]
 async fn conn(
-    latest_tcp: &rocket::State<Arc<Mutex<Option<TcpConnection>>>>,
-) -> Option<Json<IpInfo>> {
+    tcp_db: &rocket::State<Arc<Mutex<TcpDb>>>,
+) -> Json<TcpDb> {
     // Just return a JSON array of todos, applying the limit and offset.
-    let conn_clone = latest_tcp.clone();
-    let mut guard = conn_clone.lock().await;
-    match &mut *guard {
-        Some(tcp_conn) => {
-            let ip = tcp_conn.get_a_ip().to_owned();
-            // let ip_info = lookup_ip(&ip).await;
-            // let pretty = serde_json::to_string_pretty(&ip_info).unwrap();
-            let url = format!(
-                "http://demo.ip-api.com/json/{}?fields=66846719",
-                ip.to_string()
-            );
-            println!("{}", url);
-            // println!("{} | {:#?}", flow, tcp_conn);
-            if let Ok(resp) = reqwest::get(url).await {
-                if let Ok(text) = resp.text().await {
-                    // let ip_info: Result<IpInfo, serde_json::Error> = serde_json::from_str(&text.as_str()).unwrap();
-                    // error!("{} | {:#?}", ip, text);
-                    // let text_json = serde_json::(text);
-                    // error!("{:#?}", text_json);
-                    // let pretty = serde_json::to_string_pretty(&text_json).unwrap();
-                    let ip_info: IpInfo = serde_json::from_str(text.as_str()).unwrap();
-                    return Some(Json(ip_info));
-                }
-            }
-            return None;
+    // let conns_clone = tcp_conns.clone();
+    let mut guard = tcp_db.lock().await;
+    let ref db = *guard;
+    Json(db.to_owned())
+}
+
+fn get_local_ipv4(interface: &NetworkInterface) -> Option<Ipv4Addr> {
+    debug!("{}", &interface.to_string());
+    let regexp = Regex::new(r"(\d+)\.(\d+)\.(\d+)\.(\d+)").unwrap();
+    match regexp.captures(interface.to_string().as_str()) {
+        Some(captures) => {
+            info!("captures: {:#?}", captures);
+            let byte_1 = captures.get(1).unwrap().as_str().parse::<u8>().unwrap();
+            let byte_2 = captures.get(2).unwrap().as_str().parse::<u8>().unwrap();
+            let byte_3 = captures.get(3).unwrap().as_str().parse::<u8>().unwrap();
+            let byte_4 = captures.get(4).unwrap().as_str().parse::<u8>().unwrap();
+            let local_ipv4 = captures.get(0).unwrap().as_str().to_string();
+            info!("byte1: {}", byte_1);
+            info!("byte2: {}", byte_2);
+            info!("byte3: {}", byte_3);
+            info!("byte4: {}", byte_4);
+            Some(Ipv4Addr::new(byte_1, byte_2, byte_3, byte_4))
         }
-        None => {
-            let empty = "No latest conn".to_string();
-            let _pretty = serde_json::to_string_pretty(&empty).unwrap();
-            return None;
-        }
+        None => None,
     }
 }
 
@@ -154,9 +152,22 @@ async fn main() -> anyhow::Result<()> {
     let iface_name: String = args.interface;
     let ipv4: String = args.ipv4;
 
+    // Find the network interface with the provided name
+    let interface_names_match = |iface: &NetworkInterface| iface.name == iface_name;
+    let interfaces = datalink::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .filter(interface_names_match)
+        .next()
+        .unwrap_or_else(|| panic!("No such network interface: {}", iface_name));
+
+    let local_ipv4 =
+        get_local_ipv4(&interface).expect("Could not identify local Ipv4 address for interface");
+
+
     // Shared state between threads
-    let latest_tcp: Arc<Mutex<Option<TcpConnection>>>;
-    latest_tcp = Arc::new(Mutex::new(None));
+    let tcp_db: Arc<Mutex<TcpDb>>;
+    tcp_db = Arc::new(Mutex::new(TcpDb::new(local_ipv4)));
 
     let count: Arc<Mutex<u32>>;
     count = Arc::new(Mutex::new(0));
@@ -164,17 +175,18 @@ async fn main() -> anyhow::Result<()> {
     let count2 = count.clone();
 
     // Build and launch the Rocket web server
-    let clone1 = latest_tcp.clone();
+    let tcp_db_1 = tcp_db.clone();
     let rocket = rocket::build()
-        .manage(clone1)
+        .manage(tcp_db_1)
         .manage(count1)
         .mount("/", routes![index, conn, count, reset_count]);
     let thread1 = rocket::tokio::spawn(rocket.launch());
 
     // Launch the packet capture thread
-    let clone2 = latest_tcp.clone();
-    let _ =
-        rocket::tokio::task::spawn(async move { process(ipv4, iface_name, clone2, count2).await });
+    let tcp_db_2 = tcp_db.clone();
+    let _ = rocket::tokio::task::spawn(
+        async move { process(ipv4, interface, tcp_db_2, count2).await },
+    );
 
     // Await the Rocket thread ONLY so Ctrl-C works
     _ = thread1.await.unwrap();

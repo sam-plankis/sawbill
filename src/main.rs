@@ -125,11 +125,6 @@ fn get_local_ipv4(interface: &NetworkInterface) -> Option<Ipv4Addr> {
             let byte_2 = captures.get(2).unwrap().as_str().parse::<u8>().unwrap();
             let byte_3 = captures.get(3).unwrap().as_str().parse::<u8>().unwrap();
             let byte_4 = captures.get(4).unwrap().as_str().parse::<u8>().unwrap();
-            let local_ipv4 = captures.get(0).unwrap().as_str().to_string();
-            info!("byte1: {}", byte_1);
-            info!("byte2: {}", byte_2);
-            info!("byte3: {}", byte_3);
-            info!("byte4: {}", byte_4);
             Some(Ipv4Addr::new(byte_1, byte_2, byte_3, byte_4))
         }
         None => None,

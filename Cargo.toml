@@ -10,7 +10,6 @@ env_logger = "0.10.0"
 indexmap = "2.0.0"
 log = "0.4.20"
 pnet = "0.34.0"
-redis = "0.23.3"
 regex = "1.9.5"
 reqwest = "0.11.20"
 rocket = { version = "=0.5.0-rc.3", features = ["serde_json", "json"] }

@@ -18,19 +18,22 @@ impl TcpDb {
     }
 
     fn parse_flow(&self, datagram: &TcpDatagram) -> String {
+        let mut flow: String;
+        flow = "unknown".to_string();
         if self.local_ipv4 == datagram.dst_ip {
-            format!(
+            flow = format!(
                 "{}:{}<->{}:{}",
                 datagram.src_ip, datagram.src_port, datagram.dst_ip, datagram.dst_port
             );
         }
         if self.local_ipv4 == datagram.src_ip {
-            format!(
+            flow = format!(
                 "{}:{}<->{}:{}",
                 datagram.dst_ip, datagram.dst_port, datagram.src_ip, datagram.src_port
             );
         }
-        "unknown".to_string()
+        info!("tcp_db | TcpDb | parse_flow: {}", flow);
+        flow
     }
 
     pub fn add(&mut self, datagram: TcpDatagram) -> () {
@@ -43,10 +46,12 @@ impl TcpDb {
                 datagram.dst_ip,
                 datagram.dst_port,
             );
+            info!("Added new connection: {:?}", new_connection);
             self.flows.insert(flow.clone(), new_connection);
         }
         if let Some(connection) = self.flows.get_mut(&flow) {
             connection.add(datagram);
+            info!("Updated existing connection: {:?}", connection);
         }
     }
 }

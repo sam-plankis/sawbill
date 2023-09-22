@@ -119,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Launch the packet capture thread
     let tcp_db_2 = tcp_db.clone();
-    let _ =
+    let thread2 =
         rocket::tokio::task::spawn(async move { process(ipv4, interface, tcp_db_2, count2).await });
 
     // Await the Rocket thread ONLY so Ctrl-C works

@@ -1,44 +1,20 @@
 #[macro_use]
 extern crate rocket;
-
 extern crate pnet;
-extern crate redis;
 use anyhow;
-
+use clap::Parser;
+use pnet::datalink::NetworkInterface;
 use regex::Regex;
 use rocket::futures::lock::Mutex;
-use std::{sync::Arc, net::{IpAddr, Ipv4Addr}};
-
-use connection::TcpConnection;
-
-use clap::Parser;
-use serde_json;
-
-use rocket::serde::{json::Json, Serialize};
-use pnet::{datalink::{self, NetworkInterface}};
-
+use rocket::serde::json::Json;
+use std::net::Ipv4Addr;
+use std::sync::Arc;
 mod connection;
 mod datagram;
 mod processor;
 use processor::process;
 mod tcp_db;
 use tcp_db::TcpDb;
-
-use pnet::datalink::Channel::Ethernet;
-
-async fn lookup_ip(ip: &str) -> String {
-    let url = format!(
-        "http://demo.ip-api.com/json/{}?fields=66846719",
-        ip.to_string()
-    );
-    if let Ok(resp) = reqwest::get(url).await {
-        if let Ok(text) = resp.text().await {
-            let pretty = serde_json::to_string_pretty(&text).unwrap();
-            return pretty;
-        }
-    }
-    return "None".to_string();
-}
 
 use rocket::http::ContentType;
 #[get("/")]
@@ -53,39 +29,6 @@ fn index() -> (ContentType, &'static str) {
             </body>
         </html>";
     (ContentType::HTML, page)
-}
-
-#[macro_use]
-extern crate serde_derive;
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IpInfo {
-    pub status: String,
-    pub continent: String,
-    pub continent_code: String,
-    pub country: String,
-    pub country_code: String,
-    pub region: String,
-    pub region_name: String,
-    pub city: String,
-    pub district: String,
-    pub zip: String,
-    pub lat: f64,
-    pub lon: f64,
-    pub timezone: String,
-    pub offset: i64,
-    pub currency: String,
-    pub isp: String,
-    pub org: String,
-    #[serde(rename = "as")]
-    pub as_field: String,
-    pub asname: String,
-    pub reverse: String,
-    pub mobile: bool,
-    pub proxy: bool,
-    pub hosting: bool,
-    pub query: String,
 }
 
 #[get("/count")]
@@ -105,12 +48,10 @@ async fn reset_count(count: &rocket::State<Arc<Mutex<u32>>>) -> String {
 }
 
 #[get("/tcpdb")]
-async fn conn(
-    tcp_db: &rocket::State<Arc<Mutex<TcpDb>>>,
-) -> Json<TcpDb> {
+async fn conn(tcp_db: &rocket::State<Arc<Mutex<TcpDb>>>) -> Json<TcpDb> {
     // Just return a JSON array of todos, applying the limit and offset.
     // let conns_clone = tcp_conns.clone();
-    let mut guard = tcp_db.lock().await;
+    let guard = tcp_db.lock().await;
     let ref db = *guard;
     Json(db.to_owned())
 }
@@ -149,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Find the network interface with the provided name
     let interface_names_match = |iface: &NetworkInterface| iface.name == iface_name;
-    let interfaces = datalink::interfaces();
+    let interfaces = pnet::datalink::interfaces();
     let interface = interfaces
         .into_iter()
         .filter(interface_names_match)
@@ -158,7 +99,6 @@ async fn main() -> anyhow::Result<()> {
 
     let local_ipv4 =
         get_local_ipv4(&interface).expect("Could not identify local Ipv4 address for interface");
-
 
     // Shared state between threads
     let tcp_db: Arc<Mutex<TcpDb>>;
@@ -179,9 +119,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Launch the packet capture thread
     let tcp_db_2 = tcp_db.clone();
-    let _ = rocket::tokio::task::spawn(
-        async move { process(ipv4, interface, tcp_db_2, count2).await },
-    );
+    let _ =
+        rocket::tokio::task::spawn(async move { process(ipv4, interface, tcp_db_2, count2).await });
 
     // Await the Rocket thread ONLY so Ctrl-C works
     _ = thread1.await.unwrap();

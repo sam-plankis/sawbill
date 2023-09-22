@@ -1,8 +1,8 @@
 use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::tcp::TcpOption;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use std::net::IpAddr;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpDatagram {

@@ -37,6 +37,7 @@ impl TcpDb {
         let flow = self.parse_flow(&datagram);
         if !self.flows.contains_key(&flow) {
             let new_connection = TcpConnection::new(
+                flow.clone(),
                 datagram.src_ip,
                 datagram.src_port,
                 datagram.dst_ip,
